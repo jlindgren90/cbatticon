@@ -9,3 +9,7 @@ cbatticon
 
 # vim files
 *.swp
+
+# makepkg files
+pkg/
+*.pkg.tar.*
