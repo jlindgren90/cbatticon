@@ -691,7 +691,8 @@ static gboolean get_battery_charge (gboolean remaining, gint *percentage, gint *
             g_printf ("current rate: %s\n", "unavailable");
         }
 
-        return FALSE;
+        *time = -1;
+        return TRUE;
     }
 
     if (remaining == TRUE) {
