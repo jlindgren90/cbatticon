@@ -696,12 +696,12 @@ static gboolean get_battery_current_rate (gboolean use_charge, gdouble *rate)
     } else {
         // compute rate from capacity change
         if (use_charge == FALSE) {
-            *rate = -filter_get_rate (&energy_filter, "power");
+            *rate = fabs (filter_get_rate (&energy_filter, "power"));
         } else {
-            *rate = -filter_get_rate (&charge_filter, "current");
+            *rate = fabs (filter_get_rate (&charge_filter, "current"));
         }
 
-        if (fabs (*rate) < 0.01) {
+        if (*rate < 0.01) {
             return FALSE;
         }
     }
