@@ -25,6 +25,8 @@
 #define CBATTICON_VERSION_STRING "1.6.13"
 #define CBATTICON_STRING         "cbatticon"
 
+#define _POSIX_C_SOURCE 200112L
+
 #include <glib.h>
 #include <glib/gi18n.h>
 #include <glib/gprintf.h>
@@ -46,6 +48,7 @@
 #include <locale.h>
 #include <math.h>
 #include <syslog.h>
+#include <time.h>
 
 #ifdef WITH_QT5
 
@@ -172,16 +175,21 @@ static gchar *ac_path        = NULL;
 
 struct filter {
     gdouble samples[MAX_SAMPLES];
+    struct timespec sample_times[MAX_SAMPLES];
     gint num_samples, next_sample;
 };
 
-static gdouble run_filter (struct filter *f, gdouble value)
+static void filter_append (struct filter *f, gdouble value)
 {
-    gdouble sum = 0.0;
-
     f->samples[f->next_sample] = value;
+    clock_gettime (CLOCK_MONOTONIC, &f->sample_times[f->next_sample]);
     f->next_sample = (f->next_sample + 1) % MAX_SAMPLES;
     f->num_samples = MAX (f->next_sample, f->num_samples);
+}
+
+static gdouble filter_get_mean (struct filter *f)
+{
+    gdouble sum = 0.0;
 
     for (gint i = 0; i < f->num_samples; i++) {
         sum += f->samples[i];
@@ -190,6 +198,35 @@ static gdouble run_filter (struct filter *f, gdouble value)
     return sum / (gdouble)f->num_samples;
 }
 
+static gdouble filter_get_rate (struct filter *f, const char *attribute)
+{
+    if (f->num_samples < 2) {
+        return 0.0;
+    }
+
+    int a = (f->next_sample + MAX_SAMPLES - f->num_samples) % MAX_SAMPLES;
+    int b = (f->next_sample + MAX_SAMPLES - 1) % MAX_SAMPLES;
+
+    gdouble value_diff = f->samples[b] - f->samples[a];
+    gdouble time_diff =
+        (gdouble)(f->sample_times[b].tv_sec - f->sample_times[a].tv_sec)
+            + ((gdouble)f->sample_times[b].tv_nsec / 1000000000.0)
+            - ((gdouble)f->sample_times[a].tv_nsec / 1000000000.0);
+
+    if (time_diff < 60.0) {
+        return 0.0; // measure rate over 60s minimum
+    }
+
+    if (configuration.debug_output == TRUE) {
+        g_print ("estimate %s from delta of %g over %g seconds\n",
+            attribute, value_diff, time_diff);
+    }
+
+    return value_diff / time_diff * 3600.0; // rate per hour
+}
+
+static struct filter energy_filter;
+static struct filter charge_filter;
 static struct filter power_filter;
 static struct filter current_filter;
 
@@ -610,13 +647,23 @@ static gboolean get_battery_full_capacity (gboolean *use_charge, gdouble *capaci
 
 static gboolean get_battery_remaining_capacity (gboolean use_charge, gdouble *capacity)
 {
+    gboolean sysattr_status;
+
     g_return_val_if_fail (capacity != NULL, FALSE);
 
     if (use_charge == FALSE) {
-        return get_sysattr_double (battery_path, "energy_now", capacity);
+        sysattr_status = get_sysattr_double (battery_path, "energy_now", capacity);
+        if (sysattr_status == TRUE) {
+            filter_append (&energy_filter, *capacity);
+        }
     } else {
-        return get_sysattr_double (battery_path, "charge_now", capacity);
+        sysattr_status = get_sysattr_double (battery_path, "charge_now", capacity);
+        if (sysattr_status == TRUE) {
+            filter_append (&charge_filter, *capacity);
+        }
     }
+
+    return sysattr_status;
 }
 
 static gboolean get_battery_remaining_capacity_pct (gdouble *capacity)
@@ -630,7 +677,9 @@ static gboolean get_battery_current_rate (gboolean use_charge, gdouble *rate)
 {
     const gchar * attribute;
     struct filter * f;
-    gdouble rate_now;
+    gdouble rate_now = 0;
+
+    g_return_val_if_fail (rate != NULL, FALSE);
 
     if (use_charge == FALSE) {
         attribute = "power_now";
@@ -640,16 +689,25 @@ static gboolean get_battery_current_rate (gboolean use_charge, gdouble *rate)
         f = &current_filter;
     }
 
-    if (get_sysattr_double (battery_path, attribute, &rate_now) == FALSE) {
-        return FALSE;
+    if (get_sysattr_double (battery_path, attribute, &rate_now) == TRUE) {
+        // get rate from battery
+        filter_append (f, rate_now);
+        *rate = filter_get_mean (f);
+    } else {
+        // compute rate from capacity change
+        if (use_charge == FALSE) {
+            *rate = -filter_get_rate (&energy_filter, "power");
+        } else {
+            *rate = -filter_get_rate (&charge_filter, "current");
+        }
+
+        if (fabs (*rate) < 0.01) {
+            return FALSE;
+        }
     }
 
-    if (rate != NULL) {
-        *rate = run_filter (f, rate_now);
-
-        if (configuration.debug_output == TRUE) {
-            g_printf ("%s = %g, average = %g\n", attribute, rate_now, *rate);
-        }
+    if (configuration.debug_output == TRUE) {
+        g_printf ("%s = %g, average = %g\n", attribute, rate_now, *rate);
     }
 
     return TRUE;
@@ -657,6 +715,10 @@ static gboolean get_battery_current_rate (gboolean use_charge, gdouble *rate)
 
 static void reset_battery_current_rate (void)
 {
+    energy_filter.num_samples = 0;
+    energy_filter.next_sample = 0;
+    charge_filter.num_samples = 0;
+    charge_filter.next_sample = 0;
     power_filter.num_samples = 0;
     power_filter.next_sample = 0;
     current_filter.num_samples = 0;
@@ -669,7 +731,7 @@ static void reset_battery_current_rate (void)
 
 static gboolean get_battery_charge (gboolean remaining, gint *percentage, gint *time)
 {
-    gdouble full_capacity, remaining_capacity, current_rate;
+    gdouble full_capacity = 0, remaining_capacity = 0, current_rate;
     gboolean use_charge;
 
     g_return_val_if_fail (percentage != NULL, FALSE);
