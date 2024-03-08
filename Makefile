@@ -6,8 +6,8 @@ V = 0
 ### whether to link against gtk3 or gtk2 (default: gtk3)
 WITH_GTK3 = 1
 
-### whether to link against qt5 instead (default: off)
-WITH_QT5 = 0
+### whether to link against qt6 instead (default: off)
+WITH_QT6 = 0
 
 ### libnotify support: 0 for off, 1 for on (default: on)
 WITH_NOTIFY = 1
@@ -54,10 +54,10 @@ CPPFLAGS += -DWITH_NOTIFY
 endif
 CPPFLAGS += -DNLSDIR=\"$(NLSDIR)\"
 
-ifeq ($(WITH_QT5),1)
+ifeq ($(WITH_QT6),1)
 CC = $(CXX)
-CPPFLAGS += -DWITH_QT5
-LANG_CFLAGS = -x c++ -std=c++11 -fPIC
+CPPFLAGS += -DWITH_QT6
+LANG_CFLAGS = -x c++ -std=c++17 -fPIC
 else
 LANG_CFLAGS = -std=c99
 endif
@@ -66,8 +66,8 @@ CFLAGS ?= -O2
 CFLAGS += -Wall -Wno-deprecated-declarations
 CFLAGS += $(shell $(PKG_CONFIG) --cflags $(PKG_DEPS))
 
-ifeq ($(WITH_QT5),1)
-PKG_DEPS = Qt5Widgets
+ifeq ($(WITH_QT6),1)
+PKG_DEPS = Qt6Widgets
 else ifeq ($(WITH_GTK3), 0)
 PKG_DEPS = gtk+-2.0
 else

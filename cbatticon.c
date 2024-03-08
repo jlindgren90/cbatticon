@@ -36,7 +36,7 @@
 #include <libnotify/notify.h>
 #endif
 
-#ifdef WITH_QT5
+#ifdef WITH_QT6
 #include <QApplication>
 #include <QSystemTrayIcon>
 #else
@@ -50,7 +50,7 @@
 #include <syslog.h>
 #include <time.h>
 
-#ifdef WITH_QT5
+#ifdef WITH_QT6
 
 #define TrayIcon                        QSystemTrayIcon
 #define TRAY_ICON_NEW                   new QSystemTrayIcon
@@ -290,7 +290,7 @@ static gint get_options (int *argc, char ***argv)
 
     /* option : list available icon types */
 
-#ifdef WITH_QT5
+#ifdef WITH_QT6
     new QApplication (*argc, *argv);
 #else
     gtk_init (argc, argv); /* gtk is required as from this point */
@@ -795,7 +795,7 @@ static void create_tray_icon (void)
 
     g_timeout_add_seconds (configuration.update_interval, (GSourceFunc)update_tray_icon, (gpointer)tray_icon);
 
-#ifdef WITH_QT5
+#ifdef WITH_QT6
     QObject::connect (tray_icon, &QSystemTrayIcon::activated, [tray_icon] {
         on_tray_icon_click (tray_icon, NULL);
     });
@@ -1267,7 +1267,7 @@ int main (int argc, char **argv)
     get_power_supplies();
     create_tray_icon ();
 
-#ifdef WITH_QT5
+#ifdef WITH_QT6
     qApp->exec();
 #else
     gtk_main();
