@@ -406,6 +406,22 @@ static gboolean changed_power_supplies (void)
     old_num_ps = num_ps;
     old_total_ps = total_ps;
 
+    if (power_supplies_changed) {
+
+        /* redetect power supply paths */
+
+        gchar *old_battery_path = battery_path; battery_path = NULL;
+        gchar *old_ac_path = ac_path; ac_path = NULL;
+
+        get_power_supplies ();
+        power_supplies_changed =
+            (g_strcmp0 (battery_path, old_battery_path) != 0) ||
+            (g_strcmp0 (ac_path, old_ac_path) != 0);
+
+        g_free (old_battery_path);
+        g_free (old_ac_path);
+    }
+
     return power_supplies_changed;
 }
 
@@ -845,8 +861,6 @@ static void update_tray_icon_status (TrayIcon *tray_icon)
 
     if (changed_power_supplies () == TRUE)
     {
-        get_power_supplies ();
-
         old_battery_status = -1;
 
         ac_only                = FALSE;
